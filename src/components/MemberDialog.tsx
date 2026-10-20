@@ -74,7 +74,7 @@ type MemberDialogProps = {
   now: Date
   onClose: () => void
   onMove: (location: LocationId) => void
-  onSave: (draft: MemberDraft) => void
+  onSave: (draft: MemberDraft) => void | Promise<void>
   onDelete: () => void
   onMakeMe: () => void
   onClearMe: () => void
@@ -103,8 +103,8 @@ export function MemberDialog({
           submitLabel="Save"
           initial={{ name: member.name, phone: member.phone, photo: member.photo }}
           onCancel={() => setEditing(false)}
-          onSubmit={(draft) => {
-            onSave(draft)
+          onSubmit={async (draft) => {
+            await onSave(draft)
             setEditing(false)
           }}
         />

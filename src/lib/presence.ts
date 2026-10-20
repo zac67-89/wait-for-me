@@ -1,4 +1,5 @@
 import type { Board, LocationId, Member } from '../types'
+import { nextYangonReset } from './time'
 
 export type PlaceGroup = 'outside' | 'lobby' | 'up'
 
@@ -79,10 +80,7 @@ export function boundaryKey(now: Date): string {
 }
 
 export function nextReset(now: Date): Date {
-  const next = new Date(now)
-  next.setHours(20, 0, 0, 0)
-  if (now.getTime() >= next.getTime()) next.setDate(next.getDate() + 1)
-  return next
+  return nextYangonReset(now)
 }
 
 export function formatCountdown(ms: number): string {

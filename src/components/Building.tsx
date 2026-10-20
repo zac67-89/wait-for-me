@@ -21,6 +21,7 @@ type BuildingProps = {
   dragging: boolean
   over: LocationId | null
   isDay: boolean
+  status: 'loading' | 'ready' | 'error'
   onOpen: (id: string) => void
   onDragStart: () => void
   onDragEnd: () => void
@@ -53,7 +54,7 @@ function dropHandlers(
 }
 
 export function Building(props: BuildingProps) {
-  const { members, meId, dragging, over, isDay, onOpen, onDragStart, onDragEnd, onAdd } = props
+  const { members, meId, dragging, over, isDay, status, onOpen, onDragStart, onDragEnd, onAdd } = props
   const outside = membersIn(members, 'outside')
 
   return (
@@ -152,8 +153,16 @@ export function Building(props: BuildingProps) {
           <div className="people">
             {outside.length === 0 ? (
               <div className="empty-plaza">
-                <p>{dragging ? 'Drop here' : 'The sidewalk is clear.'}</p>
-                {members.length === 0 ? (
+                <p>
+                  {dragging
+                    ? 'Drop here'
+                    : status === 'loading'
+                      ? 'Checking the board…'
+                      : status === 'error'
+                        ? 'The board could not be loaded.'
+                        : 'The sidewalk is clear.'}
+                </p>
+                {status === 'ready' && members.length === 0 ? (
                   <button type="button" className="btn-primary" onClick={onAdd}>
                     Add the first person
                   </button>

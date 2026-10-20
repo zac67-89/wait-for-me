@@ -4,60 +4,93 @@ import { Building } from './components/Building'
 import { Directory } from './components/Directory'
 import { Dialog, MemberDialog } from './components/MemberDialog'
 import { MemberForm } from './components/MemberForm'
+import { createMember, deleteMember, fetchBoard, POLL_MS, updateMember } from './lib/api'
 import {
-  applyReset,
   formatClock,
   formatCountdown,
   formatDay,
-  nextReset,
   movementSentence,
+  nextReset,
   PLACES,
   RESET_MESSAGE,
 } from './lib/presence'
-import { loadBoard, saveBoard } from './lib/storage'
-import type { LocationId, Member, MemberDraft } from './types'
+import { loadMeId, saveMeId } from './lib/storage'
+import type { Board, LocationId, Member, MemberDraft } from './types'
 
 type ModalState = null | { kind: 'create' } | { kind: 'member'; id: string }
+type Phase = 'loading' | 'ready' | 'error'
+
+function keptMe(members: Member[], meId: string | null): string | null {
+  return meId && members.some((member) => member.id === meId) ? meId : null
+}
 
 export default function App() {
-  const boot = useState(() => loadBoard())[0]
-  const [board, setBoard] = useState(boot.board)
+  const [board, setBoard] = useState<Board>(() => ({ members: [], resetKey: '', meId: loadMeId() }))
+  const [phase, setPhase] = useState<Phase>('loading')
   const [now, setNow] = useState(() => new Date())
-  const [banner, setBanner] = useState<string | null>(boot.resetHappened ? RESET_MESSAGE : null)
+  const [banner, setBanner] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
   const [modal, setModal] = useState<ModalState>(null)
   const [dragging, setDragging] = useState(false)
   const [over, setOver] = useState<LocationId | null>(null)
-  const previousKey = useRef(board.resetKey)
+  const serial = useRef(0)
+  const resetKeyRef = useRef('')
+  const warned = useRef(false)
 
   const closeModal = useCallback(() => setModal(null), [])
 
-  useEffect(() => {
-    const error = saveBoard(board)
-    if (error) setBanner(error)
-  }, [board])
-
-  useEffect(() => {
-    if (previousKey.current === board.resetKey) return
-    previousKey.current = board.resetKey
-    if (board.members.length === 0) return
-    setBanner(RESET_MESSAGE)
-    setAnnouncement(RESET_MESSAGE)
-  }, [board.resetKey, board.members.length])
-
-  useEffect(() => {
-    const tick = () => {
-      const current = new Date()
-      setNow(current)
-      setBoard((existing) => applyReset(existing, current).board)
-    }
-    const interval = window.setInterval(tick, 5000)
-    const timeout = window.setTimeout(tick, nextReset(new Date()).getTime() - Date.now() + 400)
-    return () => {
-      window.clearInterval(interval)
-      window.clearTimeout(timeout)
+  const pull = useCallback(async () => {
+    const seen = serial.current
+    try {
+      const next = await fetchBoard()
+      if (seen !== serial.current) return
+      const previousReset = resetKeyRef.current
+      resetKeyRef.current = next.resetOn
+      if (previousReset && previousReset !== next.resetOn) {
+        setBanner(RESET_MESSAGE)
+        setAnnouncement(RESET_MESSAGE)
+      }
+      setNow(new Date())
+      setBoard((current) => ({
+        members: next.members,
+        resetKey: next.resetOn,
+        meId: keptMe(next.members, current.meId),
+      }))
+      setPhase('ready')
+      warned.current = false
+    } catch (error) {
+      if (seen !== serial.current) return
+      const message = error instanceof Error ? error.message : 'The board could not be reached.'
+      setPhase((current) => (current === 'loading' ? 'error' : current))
+      if (!warned.current) {
+        warned.current = true
+        setBanner(message)
+      }
     }
   }, [])
+
+  useEffect(() => {
+    saveMeId(board.meId)
+  }, [board.meId])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void pull()
+    }, POLL_MS)
+    const onShow = () => {
+      if (document.visibilityState === 'visible') void pull()
+    }
+    document.addEventListener('visibilitychange', onShow)
+    window.addEventListener('focus', onShow)
+    const clock = window.setInterval(() => setNow(new Date()), 30000)
+    void pull()
+    return () => {
+      window.clearInterval(timer)
+      window.clearInterval(clock)
+      document.removeEventListener('visibilitychange', onShow)
+      window.removeEventListener('focus', onShow)
+    }
+  }, [pull])
 
   const ordered = useMemo(
     () =>
@@ -77,60 +110,87 @@ export default function App() {
   const streetPlaces = PLACES.filter((place) => place.group !== 'up')
   const floorPlaces = PLACES.filter((place) => place.group === 'up')
 
-  function moveMember(id: string, location: LocationId) {
+  async function withWrite(work: () => Promise<void>) {
+    serial.current += 1
+    try {
+      await work()
+    } finally {
+      serial.current += 1
+    }
+    await pull()
+  }
+
+  function replaceMember(member: Member) {
+    setBoard((current) => ({
+      ...current,
+      members: current.members.some((item) => item.id === member.id)
+        ? current.members.map((item) => (item.id === member.id ? member : item))
+        : [...current.members, member],
+    }))
+  }
+
+  async function moveMember(id: string, location: LocationId) {
     const member = board.members.find((item) => item.id === id)
     if (!member || member.location === location) {
       setOver(null)
       setDragging(false)
       return
     }
-    const stamp = new Date().toISOString()
+    const previous = member.location
     setBoard((current) => ({
       ...current,
       members: current.members.map((item) =>
-        item.id === id ? { ...item, location, updatedAt: stamp } : item,
+        item.id === id ? { ...item, location, updatedAt: new Date().toISOString() } : item,
       ),
     }))
     setAnnouncement(movementSentence(member.name, location))
     setOver(null)
     setDragging(false)
+    await withWrite(async () => {
+      try {
+        replaceMember(await updateMember(id, { location }))
+      } catch (error) {
+        setBoard((current) => ({
+          ...current,
+          members: current.members.map((item) => (item.id === id ? { ...item, location: previous } : item)),
+        }))
+        setBanner(error instanceof Error ? error.message : 'Could not move that person.')
+      }
+    })
   }
 
-  function addMember(draft: MemberDraft) {
-    const stamp = new Date().toISOString()
-    const member: Member = {
-      id: crypto.randomUUID(),
-      name: draft.name,
-      phone: draft.phone,
-      photo: draft.photo,
-      location: 'outside',
-      createdAt: stamp,
-      updatedAt: stamp,
-    }
-    setBoard((current) => ({ ...current, members: [...current.members, member] }))
-    setAnnouncement(`${member.name} added outside the building.`)
-    setModal(null)
+  async function addMember(draft: MemberDraft) {
+    await withWrite(async () => {
+      const member = await createMember(draft)
+      replaceMember(member)
+      setAnnouncement(`${member.name} added outside the building.`)
+      setModal(null)
+    })
   }
 
-  function saveMember(id: string, draft: MemberDraft) {
-    setBoard((current) => ({
-      ...current,
-      members: current.members.map((member) =>
-        member.id === id ? { ...member, name: draft.name, phone: draft.phone, photo: draft.photo } : member,
-      ),
-    }))
-    setAnnouncement(`${draft.name} updated.`)
+  async function saveMember(id: string, draft: MemberDraft) {
+    await withWrite(async () => {
+      replaceMember(await updateMember(id, draft))
+      setAnnouncement(`${draft.name} updated.`)
+    })
   }
 
-  function removeMember(id: string) {
+  async function removeMember(id: string) {
     const member = board.members.find((item) => item.id === id)
-    setBoard((current) => ({
-      ...current,
-      meId: current.meId === id ? null : current.meId,
-      members: current.members.filter((item) => item.id !== id),
-    }))
-    setAnnouncement(member ? `${member.name} removed.` : 'Teammate removed.')
-    setModal(null)
+    try {
+      await withWrite(async () => {
+        await deleteMember(id)
+        setBoard((current) => ({
+          ...current,
+          meId: current.meId === id ? null : current.meId,
+          members: current.members.filter((item) => item.id !== id),
+        }))
+        setAnnouncement(member ? `${member.name} removed.` : 'Teammate removed.')
+        setModal(null)
+      })
+    } catch (error) {
+      setBanner(error instanceof Error ? error.message : 'Could not remove that person.')
+    }
   }
 
   function renderPlaceButton(place: (typeof PLACES)[number]) {
@@ -144,7 +204,7 @@ export default function App() {
         data-tone={place.group}
         data-active={active}
         aria-pressed={active}
-        onClick={() => moveMember(me.id, place.id)}
+        onClick={() => void moveMember(me.id, place.id)}
       >
         {active ? <Check aria-hidden="true" size={16} /> : null}
         {place.title}
@@ -168,7 +228,12 @@ export default function App() {
               <p>Who is outside, in the lobby, or upstairs.</p>
             </div>
           </div>
-          <button type="button" className="btn-primary" onClick={() => setModal({ kind: 'create' })}>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={phase !== 'ready'}
+            onClick={() => setModal({ kind: 'create' })}
+          >
             <Plus aria-hidden="true" size={18} />
             Add member
           </button>
@@ -179,7 +244,8 @@ export default function App() {
             {formatDay(now)} · {formatClock(now)}
           </p>
           <p className="reset-note">
-            Everyone moves outside at 8:00 PM · {formatCountdown(nextReset(now).getTime() - now.getTime())}
+            Everyone moves outside at 8:00 PM Myanmar time ·{' '}
+            {formatCountdown(nextReset(now).getTime() - now.getTime())}
           </p>
           <div className="counts">
             <span className="count" data-tone="outside">
@@ -241,6 +307,7 @@ export default function App() {
           dragging={dragging}
           over={over}
           isDay={isDay}
+          status={phase}
           onOpen={(id) => setModal({ kind: 'member', id })}
           onDragStart={() => setDragging(true)}
           onDragEnd={() => {
@@ -249,14 +316,14 @@ export default function App() {
           }}
           onDragOver={(location) => setOver((current) => (current === location ? current : location))}
           onDragLeave={() => setOver(null)}
-          onDrop={(location, id) => moveMember(id, location)}
+          onDrop={(location, id) => void moveMember(id, location)}
           onAdd={() => setModal({ kind: 'create' })}
         />
         <Directory members={ordered} meId={board.meId} now={now} onOpen={(id) => setModal({ kind: 'member', id })} />
       </main>
 
       <footer className="footnote">
-        Saved on this browser. Other phones will not see the same board until a shared server is added.
+        Shared with every phone. The board refreshes every few seconds.
       </footer>
 
       {modal?.kind === 'create' ? (
@@ -277,7 +344,7 @@ export default function App() {
           isMe={activeMember.id === board.meId}
           now={now}
           onClose={closeModal}
-          onMove={(location) => moveMember(activeMember.id, location)}
+          onMove={(location) => void moveMember(activeMember.id, location)}
           onSave={(draft) => saveMember(activeMember.id, draft)}
           onDelete={() => removeMember(activeMember.id)}
           onMakeMe={() => setBoard((current) => ({ ...current, meId: activeMember.id }))}

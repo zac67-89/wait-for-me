@@ -9,7 +9,7 @@ type MemberFormProps = {
   submitLabel: string
   initial: MemberDraft
   onCancel: () => void
-  onSubmit: (draft: MemberDraft) => void
+  onSubmit: (draft: MemberDraft) => void | Promise<void>
 }
 
 export function MemberForm({ title, submitLabel, initial, onCancel, onSubmit }: MemberFormProps) {
@@ -23,6 +23,8 @@ export function MemberForm({ title, submitLabel, initial, onCancel, onSubmit }: 
   const [phoneMessage, setPhoneMessage] = useState<string | null>(null)
   const [photoMessage, setPhotoMessage] = useState<string | null>(null)
   const [reading, setReading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
 
   function validate(nextName: string, nextPhone: string) {
@@ -39,9 +41,15 @@ export function MemberForm({ title, submitLabel, initial, onCancel, onSubmit }: 
       onSubmit={(event) => {
         event.preventDefault()
         setSubmitted(true)
-        if (reading) return
+        if (reading || saving) return
         if (!validate(name, phone)) return
-        onSubmit({ name: name.trim(), phone: phone.trim(), photo })
+        setSaving(true)
+        setFormError(null)
+        Promise.resolve(onSubmit({ name: name.trim(), phone: phone.trim(), photo }))
+          .catch((error: unknown) => {
+            setFormError(error instanceof Error ? error.message : 'Could not save.')
+          })
+          .finally(() => setSaving(false))
       }}
     >
       <h2 id="dialog-title">{title}</h2>
@@ -82,7 +90,7 @@ export function MemberForm({ title, submitLabel, initial, onCancel, onSubmit }: 
               Remove photo
             </button>
           ) : null}
-          <p className="field-help">Optional. A face is easier to spot on the building.</p>
+          <p className="field-help">Optional. Shared with the team, and easier to spot on the building.</p>
           {reading ? <p className="field-help">Reading photo…</p> : null}
           {photoMessage ? <p className="field-error">{photoMessage}</p> : null}
         </div>
@@ -137,13 +145,14 @@ export function MemberForm({ title, submitLabel, initial, onCancel, onSubmit }: 
       </label>
 
       <div className="form-actions">
-        <button type="button" className="btn-ghost" onClick={onCancel}>
+        <button type="button" className="btn-ghost" onClick={onCancel} disabled={saving}>
           Cancel
         </button>
-        <button type="submit" className="btn-primary" disabled={reading}>
-          {submitLabel}
+        <button type="submit" className="btn-primary" disabled={reading || saving}>
+          {saving ? 'Saving…' : submitLabel}
         </button>
       </div>
+      {formError ? <p className="field-error">{formError}</p> : null}
     </form>
   )
 }
