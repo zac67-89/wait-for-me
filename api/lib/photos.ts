@@ -1,5 +1,5 @@
 import { del, put } from '@vercel/blob'
-import { HttpError } from './http'
+import { HttpError } from './http.js'
 
 function isBlobUrl(url: string): boolean {
   try {

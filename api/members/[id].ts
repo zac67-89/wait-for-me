@@ -1,5 +1,5 @@
-import { deleteMember, updateMember } from '../lib/db'
-import { HttpError, queryValue, send, type ApiRequest, type ApiResponse } from '../lib/http'
+import { deleteMember, updateMember } from '../lib/db.js'
+import { HttpError, queryValue, send, type ApiRequest, type ApiResponse } from '../lib/http.js'
 import type { LocationId, MemberDraft } from '../../src/types'
 
 export default function handler(req: ApiRequest, res: ApiResponse) {

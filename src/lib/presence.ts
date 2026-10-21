@@ -1,5 +1,5 @@
 import type { Board, LocationId, Member } from '../types'
-import { nextYangonReset } from './time'
+import { nextYangonReset } from './time.js'
 
 export type PlaceGroup = 'outside' | 'lobby' | 'up'
 

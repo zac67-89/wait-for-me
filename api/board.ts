@@ -1,5 +1,5 @@
-import { readBoard } from './lib/db'
-import { HttpError, send, type ApiRequest, type ApiResponse } from './lib/http'
+import { readBoard } from './lib/db.js'
+import { HttpError, send, type ApiRequest, type ApiResponse } from './lib/http.js'
 
 export default function handler(req: ApiRequest, res: ApiResponse) {
   return send(res, async () => {

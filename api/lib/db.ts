@@ -1,9 +1,9 @@
 import { neon, type NeonQueryFunction } from '@neondatabase/serverless'
-import { phoneError } from '../../src/lib/presence'
-import { yangonResetOn } from '../../src/lib/time'
+import { phoneError } from '../../src/lib/presence.js'
+import { yangonResetOn } from '../../src/lib/time.js'
 import type { LocationId, Member, MemberDraft } from '../../src/types'
-import { HttpError } from './http'
-import { removeStoredPhoto, resolvePhoto } from './photos'
+import { HttpError } from './http.js'
+import { removeStoredPhoto, resolvePhoto } from './photos.js'
 
 type Sql = NeonQueryFunction<false, false>
 
